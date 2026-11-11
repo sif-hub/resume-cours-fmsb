@@ -41,7 +41,7 @@ export default async function handler(req) {
     }
 
     const API_KEY = process.env.GEMINI_API_KEY;
-    const MODEL = process.env.MODEL || "gemini-3.8-flash";
+    const MODEL = process.env.MODEL || "gemini-3.5-flash";
 
     if (!API_KEY) {
       return new Response("Clé Gemini manquante.", { status: 500, headers });
@@ -91,30 +91,51 @@ Si le cours est incomplet ou ambigu, signale-le en une ligne.
       generationConfig: { maxOutputTokens: 2048, temperature: 0.3 },
     };
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 24000);
+    const MODELS = [MODEL, "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
+      .filter((m, i, a) => m && a.indexOf(m) === i);
+    const deadline = Date.now() + 24000;
+    let r = null;
 
-    let r;
-    try {
-      r = await fetch(BASE, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": API_KEY,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (e) {
-      if (e.name === "AbortError") {
-        return new Response(
-          "Le résumé a pris trop de temps. Réduis le texte et réessaie.",
-          { status: 504, headers }
+    for (let i = 0; i < MODELS.length; i++) {
+      const m = MODELS[i];
+      const left = deadline - Date.now();
+      if (left < 3000) break;
+
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(),
+        i === 0 ? Math.min(left, 16000) : left
+      );
+      try {
+        r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": API_KEY,
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          }
         );
+      } catch (e) {
+        r = null;
+        console.error("Appel Gemini échoué:", m, e.name);
+      } finally {
+        clearTimeout(timer);
       }
-      throw e;
-    } finally {
-      clearTimeout(timer);
+
+      if (r && r.ok) break;
+      if (r && ![429, 500, 503, 504].includes(r.status)) break;
+      console.error("Modèle indisponible:", m, r ? r.status : "timeout");
+    }
+
+    if (!r) {
+      return new Response(
+        "Le service est surchargé, réessaie dans une minute.",
+        { status: 503, headers }
+      );
     }
 
     if (!r.ok) {
