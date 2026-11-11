@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Résumés de cours FMSB</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<style>
+:root{--bg:#f6f8f7;--card:#fff;--tx:#14231c;--mut:#5b6b63;--ac:#0f7a55;--acx:#fff;--bd:#d9e2dd;--code:#eef4f1}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1713;--card:#16211b;--tx:#e6efe9;--mut:#93a69b;--ac:#3fbf8f;--acx:#06251a;--bd:#263a30;--code:#1c2b23}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:820px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.5rem;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row>label{flex:1 1 180px;font-size:.85rem;color:var(--mut)}
+select,textarea,input[type=text]{width:100%;margin-top:4px;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{min-height:170px;resize:vertical;margin-top:12px}
+button{font:inherit;cursor:pointer;border-radius:10px;padding:10px 16px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+button.p{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+#st,.note{color:var(--mut);font-size:.85rem}
+#out{overflow-wrap:anywhere}
+#out h2{font-size:1.2rem;color:var(--ac);border-bottom:1px solid var(--bd);padding-bottom:4px;margin:1.2em 0 .4em}
+#out code{background:var(--code);padding:2px 6px;border-radius:6px}
+#out blockquote{margin:8px 0;padding:6px 12px;border-left:4px solid var(--ac);background:var(--code)}
+.scroll,.katex-display{overflow-x:auto;overflow-y:hidden}
+#out table{border-collapse:collapse;min-width:100%}
+#out th,#out td{border:1px solid var(--bd);padding:6px 10px;text-align:left}#out th{background:var(--code)}
+.hide{display:none}
+@media print{.card:first-of-type,.bar,.note{display:none}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<main>
+<h1>🧪 Résumés de cours FMSB</h1>
+<p class="sub">Colle ton cours, importe un PDF ou prends des photos : notions clés, formules, exemples médicaux résolus, pièges d’examen et quiz.</p>
+<div class="card">
+  <div class="row">
+    <label>Matière<select id="mat"><option>Chimie générale</option><option>Chimie organique</option><option>Biochimie</option><option>Biophysique</option><option>Physiologie</option><option>Pharmacologie</option><option>Biologie cellulaire</option><option>Autre matière</option></select></label>
+    <label>Niveau<select id="niv"><option>2ᵉ année</option><option>1ʳᵉ année</option><option>3ᵉ année</option></select></label>
+    <label>Style<select id="sty"><option value="résumé complet et structuré">Résumé complet</option><option value="fiche express d’une page maximum">Fiche express</option><option value="résumé orienté examen, avec insistance sur les pièges">Spécial examen</option></select></label>
+    <label id="codel" class="hide">Code d’accès<input type="text" id="code" autocomplete="off"></label>
+  </div>
+  <textarea id="txt" placeholder="Colle ici le texte de ton cours…"></textarea>
+  <div class="bar">
+    <input type="file" id="pdf" accept="application/pdf" class="hide">
+    <input type="file" id="img" accept="image/*" multiple class="hide">
+    <button id="pdfb" type="button">📄 Importer un PDF</button>
+    <button id="imgb" type="button">📷 Photos du cours</button>
+    <span id="imgn" class="note"></span>
+  </div>
+  <div class="bar">
+    <button class="p" id="go" type="button">Générer le résumé</button>
+    <button id="stop" type="button" class="hide">Arrêter</button>
+    <span id="st"></span>
+  </div>
+</div>
+<div class="card hide" id="res">
+  <div class="bar" style="margin:0 0 8px"><button id="cp" type="button">Copier</button><button id="pr" type="button">Imprimer / PDF</button></div>
+  <div id="out"></div>
+  <p class="note">Outil d’aide à la révision : vérifie toujours les formules et valeurs avec ton cours et tes enseignants.</p>
+</div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let imgs = [], ctrl = null, raw = "";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+try { $("code").value = localStorage.getItem("fmsb-code") || ""; } catch (e) {}
+
+// Rendu Markdown + LaTeX (les formules sont isolées avant Markdown, puis rendues par KaTeX)
+function render(md) {
+  const m = [];
+  md = md.replace(/\$\$([\s\S]+?)\$\$|\$([^\n$]+?)\$/g, (s, a, b) => { m.push([a ?? b, a != null]); return `@@M${m.length - 1}@@`; });
+  let h = DOMPurify.sanitize(marked.parse(md));
+  h = h.replace(/@@M(\d+)@@/g, (s, i) => { try { return katex.renderToString(m[i][0], { displayMode: m[i][1], throwOnError: false }); } catch (e) { return s; } });
+  $("out").innerHTML = h;
+  $("out").querySelectorAll("table").forEach(t => { const w = document.createElement("div"); w.className = "scroll"; t.replaceWith(w); w.appendChild(t); });
+}
+
+// Image -> JPEG base64 réduit (1600 px max) pour limiter la taille envoyée
+async function toB64(src) {
+  const bmp = await createImageBitmap(src), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas"); c.width = bmp.width * k; c.height = bmp.height * k;
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.8).split(",")[1];
+}
+
+$("imgb").onclick = () => $("img").click();
+$("img").onchange = async e => {
+  $("st").textContent = "Préparation des photos…";
+  imgs = await Promise.all(Array.from(e.target.files).slice(0, 6).map(toB64));
+  $("imgn").textContent = imgs.length + " photo(s)"; $("st").textContent = "";
+};
+
+$("pdfb").onclick = () => $("pdf").click();
+$("pdf").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("st").textContent = "Lecture du PDF…";
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
+    let t = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 60); i++) {
+      const c = await (await pdf.getPage(i)).getTextContent();
+      t += c.items.map(x => x.str).join(" ") + "\n\n";
+    }
+    if (t.trim().length > 50) { $("txt").value = t.trim(); imgs = []; $("imgn").textContent = ""; $("st").textContent = "PDF importé (" + pdf.numPages + " pages)."; }
+    else { // PDF scanné : les 6 premières pages sont envoyées comme images
+      imgs = [];
+      for (let i = 1; i <= Math.min(pdf.numPages, 6); i++) {
+        const p = await pdf.getPage(i), v = p.getViewport({ scale: 1.5 }), c = document.createElement("canvas");
+        c.width = v.width; c.height = v.height;
+        await p.render({ canvasContext: c.getContext("2d"), viewport: v }).promise;
+        imgs.push(await toB64(await new Promise(r => c.toBlob(r, "image/jpeg", 0.8))));
+      }
+      $("imgn").textContent = imgs.length + " page(s) scannée(s)"; $("st").textContent = "PDF scanné : 6 premières pages utilisées.";
+    }
+  } catch (err) { $("st").textContent = "PDF illisible."; }
+  e.target.value = "";
+};
+
+$("go").onclick = async () => {
+  const text = $("txt").value.trim();
+  if (!text && !imgs.length) { $("st").textContent = "Colle d’abord ton cours."; return; }
+  $("go").disabled = true; $("stop").classList.remove("hide"); $("st").textContent = "Génération en cours…";
+  $("res").classList.remove("hide"); $("out").textContent = ""; raw = "";
+  ctrl = new AbortController();
+  try {
+    const code = $("code").value;
+    try { localStorage.setItem("fmsb-code", code); } catch (e) {}
+    const r = await fetch("/api/resume", {
+      method: "POST", signal: ctrl.signal, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, images: imgs, matiere: $("mat").value, niveau: $("niv").value, style: $("sty").value, code })
+    });
+    if (!r.ok) {
+      if (r.status === 401) $("codel").classList.remove("hide");
+      throw new Error(await r.text());
+    }
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    for (;;) { const { done, value } = await rd.read(); if (done) break; raw += dec.decode(value, { stream: true }); render(raw); }
+    $("st").textContent = "Terminé ✓";
+  } catch (e) {
+    $("st").textContent = ctrl.signal.aborted ? "Arrêté." : (e.message || "Erreur, réessaie.");
+    if (!raw) $("res").classList.add("hide");
+  }
+  $("go").disabled = false; $("stop").classList.add("hide");
+};
+$("stop").onclick = () => ctrl && ctrl.abort();
+$("cp").onclick = async () => { try { await navigator.clipboard.writeText(raw); $("cp").textContent = "Copié ✓"; } catch (e) {} setTimeout(() => $("cp").textContent = "Copier", 2000); };
+$("pr").onclick = () => window.print();
+</script>
+</body>
+</html>

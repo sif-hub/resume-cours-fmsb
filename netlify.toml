@@ -1,0 +1,7 @@
+[build]
+  publish = "public"
+  command = "echo 'no build needed'"
+
+[[functions]]
+  name = "resume"
+  path = "api/resume.js"
