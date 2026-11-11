@@ -36,8 +36,8 @@ export default async function handler(req) {
       return new Response("Cours vide.", { status: 400, headers });
     }
 
-    if (String(text).length > 120000 || images.length > 6) {
-      return new Response("Cours trop long.", { status: 413, headers });
+    if (String(text).length > 20000 || images.length > 4) {
+      return new Response("Cours trop long : colle un chapitre à la fois (20 000 caractères max).", { status: 413, headers });
     }
 
     const API_KEY = process.env.GEMINI_API_KEY;
@@ -47,7 +47,7 @@ export default async function handler(req) {
       return new Response("Clé Gemini manquante.", { status: 500, headers });
     }
 
-    const BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+    const BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
     const clip = (s, n = 60) => String(s || "").slice(0, n);
 
@@ -88,13 +88,34 @@ Si le cours est incomplet ou ambigu, signale-le en une ligne.
         parts: [{ text: systemInstruction }],
       },
       contents: [{ role: "user", parts }],
+      generationConfig: { maxOutputTokens: 2048, temperature: 0.3 },
     };
 
-    const r = await fetch(BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 24000);
+
+    let r;
+    try {
+      r = await fetch(BASE, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": API_KEY,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      if (e.name === "AbortError") {
+        return new Response(
+          "Le résumé a pris trop de temps. Réduis le texte et réessaie.",
+          { status: 504, headers }
+        );
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!r.ok) {
       const err = await r.text().catch(() => "");
@@ -103,7 +124,7 @@ Si le cours est incomplet ou ambigu, signale-le en une ligne.
     }
 
     const data = await r.json();
-    const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const result = data.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("");
 
     if (!result) {
       return new Response("Erreur de génération, réessaie.", { status: 500, headers });
